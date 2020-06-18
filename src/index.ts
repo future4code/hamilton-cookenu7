@@ -8,6 +8,7 @@ import { HashManager } from "./service/HashManager";
 import { UserCookenuDatabase } from "./data/UserCookenuDatabase";
 import { Authenticator } from "./service/Authenticator";
 import { BaseDatabase } from "./data/BaseDatabase";
+import { RecipeDatabase } from "./data/RecipeDatabase";
 
 dotenv.config();
 
@@ -113,21 +114,79 @@ app.post("/login", async (req: Request, res: Response) => {
 
 app.get("/user/profile", async (req: Request, res: Response) => {
   try {
-    const token = req.headers.authorization as string;
+    const token = req.headers.token as string;
 
     const authenticator = new Authenticator();
-    const authenticationData = authenticator.getData(token)
+    const authenticationData = authenticator.getData(token);
 
     const userDatabase = new UserCookenuDatabase();
-    const user = await userDatabase.getUserById(authenticationData.id)
+    const user = await userDatabase.getUserById(authenticationData.id);
 
     res.status(200).send({
       id: user.id,
       name: user.name,
-      email: user.email
-    })
+      email: user.email,
+      role: authenticationData.role,
+    });
 
     await BaseDatabase.destroyConnection();
+  } catch (err) {
+    res.status(400).send({
+      message: err.message,
+    });
+  }
+});
+
+app.post("/recipe", async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.token as string;
+    const id = new IdGenerator().generate();
+    const date = new Date();
+
+    const recipeData = {
+      title: req.body.title,
+      description: req.body.description,
+    };
+
+    const authenticator = new Authenticator();
+    const authenticationData = authenticator.getData(token);
+
+    const recipe = new RecipeDatabase();
+    recipe.createRecipe(
+      id,
+      recipeData.title,
+      recipeData.description,
+      date,
+      authenticationData.id
+    );
+
+    res.status(200).send({
+      message: "Success",
+    });
+  } catch (err) {
+    res.status(400).send({
+      message: err.message,
+    });
+  }
+});
+
+app.get("/recipe/:id", async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.token as string;
+    const authenticator = new Authenticator();
+    const authenticationData = authenticator.getData(token);
+
+    const id = req.params.id;
+
+    const recipeDatabase = new RecipeDatabase();
+    const recipe = await recipeDatabase.getRecipeById(id);
+
+    res.status(200).send({
+      id: recipe.id,
+      title: recipe.title,
+      description: recipe.description,
+      cratedAt: recipe.date,
+    });
   } catch (err) {
     res.status(400).send({
       message: err.message,
