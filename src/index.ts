@@ -9,6 +9,7 @@ import { UserCookenuDatabase } from "./data/UserCookenuDatabase";
 import { Authenticator } from "./service/Authenticator";
 import { BaseDatabase } from "./data/BaseDatabase";
 import { RecipeDatabase } from "./data/RecipeDatabase";
+import { Followers } from "./data/Followers";
 
 dotenv.config();
 
@@ -62,13 +63,12 @@ app.post("/signup", async (req: Request, res: Response) => {
     res.status(200).send({
       token,
     });
-
-    await BaseDatabase.destroyConnection();
   } catch (err) {
     res.status(400).send({
       message: err.message,
     });
   }
+  await BaseDatabase.destroyConnection();
 });
 
 app.post("/login", async (req: Request, res: Response) => {
@@ -103,13 +103,12 @@ app.post("/login", async (req: Request, res: Response) => {
     res.status(200).send({
       token,
     });
-
-    await BaseDatabase.destroyConnection();
   } catch (err) {
     res.status(400).send({
       message: err.message,
     });
   }
+  await BaseDatabase.destroyConnection();
 });
 
 app.get("/user/profile", async (req: Request, res: Response) => {
@@ -128,13 +127,38 @@ app.get("/user/profile", async (req: Request, res: Response) => {
       email: user.email,
       role: authenticationData.role,
     });
-
-    await BaseDatabase.destroyConnection();
   } catch (err) {
     res.status(400).send({
       message: err.message,
     });
   }
+  await BaseDatabase.destroyConnection();
+});
+
+app.get("/user/:id", async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.token as string;
+
+    const authenticator = new Authenticator();
+    const authenticationData = authenticator.getData(token);
+
+    const id = req.params.id
+
+    const userDatabase = new UserCookenuDatabase();
+    const user = await userDatabase.getUserById(id);
+
+    res.status(200).send({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: authenticationData.role,
+    });
+  } catch (err) {
+    res.status(400).send({
+      message: err.message,
+    });
+  }
+  await BaseDatabase.destroyConnection();
 });
 
 app.post("/recipe", async (req: Request, res: Response) => {
@@ -168,6 +192,7 @@ app.post("/recipe", async (req: Request, res: Response) => {
       message: err.message,
     });
   }
+  await BaseDatabase.destroyConnection();
 });
 
 app.get("/recipe/:id", async (req: Request, res: Response) => {
@@ -186,6 +211,102 @@ app.get("/recipe/:id", async (req: Request, res: Response) => {
       title: recipe.title,
       description: recipe.description,
       cratedAt: recipe.date,
+    });
+  } catch (err) {
+    res.status(400).send({
+      message: err.message,
+    });
+  }
+  await BaseDatabase.destroyConnection();
+});
+
+app.post("/user/follow", async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.token as string;
+    const authenticator = new Authenticator();
+    const authenticationData = authenticator.getData(token);
+
+    const userToFollowId = req.body.userToFollowId;
+
+    if (!userToFollowId || userToFollowId === "") {
+      throw new Error("User not found");
+    }
+
+    const followersDatabase = new Followers();
+    await followersDatabase.createFollower(
+      authenticationData.id,
+      userToFollowId
+    );
+
+    res.status(200).send({
+      message: "Followed successfully",
+    });
+  } catch (err) {
+    res.status(400).send({
+      message: err.message,
+    });
+  }
+  await BaseDatabase.destroyConnection();
+});
+
+app.post("/user/unfollow", async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.token as string;
+    const authenticator = new Authenticator();
+    const authenticationData = authenticator.getData(token);
+
+    const userToUnfollowId = req.body.userToFollowId;
+
+    if (!userToUnfollowId || userToUnfollowId === "") {
+      throw new Error("User not found");
+    }
+
+    const followersDatabase = new Followers();
+    await followersDatabase.unfollow(authenticationData.id, userToUnfollowId);
+
+    res.status(200).send({
+      message: "Unfollowed successfully",
+    });
+  } catch (err) {
+    res.status(400).send({
+      message: err.message,
+    });
+  }
+  await BaseDatabase.destroyConnection();
+});
+
+app.get("/user/feed", async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.token as string;
+    const authenticator = new Authenticator();
+    const authenticationData = authenticator.getData(token);
+
+    const followersDatabase = new Followers();
+    let followingList = await followersDatabase.getFollowers(
+      authenticationData.id
+    );
+
+    const recipeDatabase = new RecipeDatabase()
+
+
+    const allRecipesFollowing = async (): Promise<any> => {
+      try {
+        let recipeList: any[] = []
+        for (let following of followingList) {
+          const resultsRecipes = await recipeDatabase.getRecipeById(following.toFollow_id)
+          recipeList.push(resultsRecipes)
+        }
+        return recipeList
+        
+      } catch (err) {
+        console.error(err.message);
+      }
+    };
+
+    const teste = allRecipesFollowing()
+
+    res.status(200).send({
+      teste,
     });
   } catch (err) {
     res.status(400).send({

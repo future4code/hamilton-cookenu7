@@ -31,5 +31,4 @@ export class RecipeDatabase extends BaseDatabase {
         console.error(err.message);
       }
   }
-
 }
