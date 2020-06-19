@@ -35,16 +35,18 @@ export class Followers extends BaseDatabase {
     }
   }
 
-  public async getFollowers(idUser: string): Promise<any> {
-    try {
-      const resultDataBase = await this.getConnection()
-        .select("toFollow_id")
-        .from(Followers.TABLE_NAME)
-        .where({ user_id: idUser });
+  public async getFeed(idUser: string): Promise<any>{
+      try{
+         const resultDatabase =  await this.getConnection().raw(`
+            SELECT * FROM Followers
+            JOIN Recipe ON toFollow_id = Recipe.user_id
+            WHERE Followers.user_id = "${idUser}"
+            ORDER BY date
+          `)
 
-      return resultDataBase; 
-    } catch (err) {
-      console.error(err.message);
-    }
+          return resultDatabase[0]
+      }catch (err) {
+        console.error(err.message);
+      }
   }
 }

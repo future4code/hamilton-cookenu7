@@ -9,7 +9,7 @@ import { UserCookenuDatabase } from "./data/UserCookenuDatabase";
 import { Authenticator } from "./service/Authenticator";
 import { BaseDatabase } from "./data/BaseDatabase";
 import { RecipeDatabase } from "./data/RecipeDatabase";
-import { Followers } from "./data/Followers";
+import { Followers } from "./data/FollowersDatabase";
 
 dotenv.config();
 
@@ -120,32 +120,6 @@ app.get("/user/profile", async (req: Request, res: Response) => {
 
     const userDatabase = new UserCookenuDatabase();
     const user = await userDatabase.getUserById(authenticationData.id);
-
-    res.status(200).send({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: authenticationData.role,
-    });
-  } catch (err) {
-    res.status(400).send({
-      message: err.message,
-    });
-  }
-  await BaseDatabase.destroyConnection();
-});
-
-app.get("/user/:id", async (req: Request, res: Response) => {
-  try {
-    const token = req.headers.token as string;
-
-    const authenticator = new Authenticator();
-    const authenticationData = authenticator.getData(token);
-
-    const id = req.params.id
-
-    const userDatabase = new UserCookenuDatabase();
-    const user = await userDatabase.getUserById(id);
 
     res.status(200).send({
       id: user.id,
@@ -282,37 +256,43 @@ app.get("/user/feed", async (req: Request, res: Response) => {
     const authenticationData = authenticator.getData(token);
 
     const followersDatabase = new Followers();
-    let followingList = await followersDatabase.getFollowers(
-      authenticationData.id
-    );
 
-    const recipeDatabase = new RecipeDatabase()
-
-
-    const allRecipesFollowing = async (): Promise<any> => {
-      try {
-        let recipeList: any[] = []
-        for (let following of followingList) {
-          const resultsRecipes = await recipeDatabase.getRecipeById(following.toFollow_id)
-          recipeList.push(resultsRecipes)
-        }
-        return recipeList
-        
-      } catch (err) {
-        console.error(err.message);
-      }
-    };
-
-    const teste = allRecipesFollowing()
+    const feed = await followersDatabase.getFeed(authenticationData.id)
 
     res.status(200).send({
-      teste,
+      feed,
     });
   } catch (err) {
     res.status(400).send({
       message: err.message,
     });
   }
+});
+
+app.get("/user/:id", async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.token as string;
+
+    const authenticator = new Authenticator();
+    const authenticationData = authenticator.getData(token);
+
+    const id = req.params.id
+
+    const userDatabase = new UserCookenuDatabase();
+    const user = await userDatabase.getUserById(id);
+
+    res.status(200).send({
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: authenticationData.role,
+    });
+  } catch (err) {
+    res.status(400).send({
+      message: err.message,
+    });
+  }
+  await BaseDatabase.destroyConnection();
 });
 
 const server = app.listen(process.env.PORT || 3000, () => {

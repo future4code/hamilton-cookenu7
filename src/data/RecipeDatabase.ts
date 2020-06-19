@@ -21,14 +21,14 @@ export class RecipeDatabase extends BaseDatabase {
 
   public async getRecipeById(id: string): Promise<any> {
     try {
-        const resultDataBase = await this.getConnection()
-      .select("*")
-      .from(RecipeDatabase.TABLE_NAME)
-      .where({ id });
+      const resultDataBase = await this.getConnection()
+        .select("*")
+        .from(RecipeDatabase.TABLE_NAME)
+        .where({ id });
 
-    return resultDataBase[0];
-    }catch (err) {
-        console.error(err.message);
-      }
+      return resultDataBase[0];
+    } catch (err) {
+      console.error(err.message);
+    }
   }
 }
