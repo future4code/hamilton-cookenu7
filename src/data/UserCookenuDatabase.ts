@@ -8,10 +8,11 @@ export class UserCookenuDatabase extends BaseDatabase {
     email: string,
     name: string,
     password: string,
-    role: string
+    role: string, 
+    device: string
   ): Promise<void> {
     await this.getConnection()
-      .insert({ id, email, name, password, role })
+      .insert({ id, email, name, password, role, device })
       .into(UserCookenuDatabase.TABLE_NAME);
   }
 

@@ -1,6 +1,5 @@
 import express from "express";
 import dotenv from "dotenv";
-import knex from "knex";
 import { AddressInfo } from "net";
 import { Request, Response } from "express";
 import { IdGenerator } from "./service/IdGenerator";
@@ -10,20 +9,11 @@ import { Authenticator } from "./service/Authenticator";
 import { BaseDatabase } from "./data/BaseDatabase";
 import { RecipeDatabase } from "./data/RecipeDatabase";
 import { Followers } from "./data/FollowersDatabase";
+import { RefreshTokenDatabase } from "./data/RefreshTokenDatabase";
 
 dotenv.config();
-
 const app = express();
-const connection = knex({
-  client: "mysql",
-  connection: {
-    host: process.env.DB_HOST,
-    port: Number(process.env.DB_PORT || "3306"),
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_DATABASE,
-  },
-});
+
 app.use(express.json());
 
 app.post("/signup", async (req: Request, res: Response) => {
@@ -41,6 +31,7 @@ app.post("/signup", async (req: Request, res: Response) => {
       name: req.body.name,
       password: req.body.password,
       role: req.body.role,
+      device: req.body.device,
     };
 
     const id = new IdGenerator().generate();
@@ -54,20 +45,69 @@ app.post("/signup", async (req: Request, res: Response) => {
       userData.email,
       userData.name,
       hashPassword,
-      userData.role
+      userData.role,
+      userData.device
     );
 
     const authenticator = new Authenticator();
-    const token = authenticator.generateToken({ id, role: userData.role });
+
+    const accessToken = authenticator.generateToken(
+      { id, role: userData.role },
+      "2min"
+    );
+
+    const refreshToken = authenticator.generateToken(
+      { id, device: userData.device },
+      process.env.REFRESH_TOKEN_EXPIRES_IN
+    );
+
+    const refreshTokenDatabase = new RefreshTokenDatabase();
+    await refreshTokenDatabase.createRefreshToken(
+      refreshToken,
+      userData.device,
+      true,
+      id
+    );
 
     res.status(200).send({
-      token,
+      accessToken,
+      refreshToken,
     });
   } catch (err) {
     res.status(400).send({
       message: err.message,
     });
   }
+  await BaseDatabase.destroyConnection();
+});
+
+app.post("/refresh/token", async (req: Request, res: Response) => {
+  try {
+    const refreshToken = req.body.refreshToken;
+    const device = req.body.device;
+
+    const authenticator = new Authenticator();
+    const refreshTokenData = authenticator.getData(refreshToken);
+
+    if (refreshTokenData.device !== device) {
+      throw new Error("Different devices");
+    }
+
+    const userDatabase = new UserCookenuDatabase();
+    const user = await userDatabase.getUserById(refreshTokenData.id);
+
+    const accessToken = authenticator.generateToken(
+      { id: user.id, role: user.role },
+      "2min"
+    );
+
+    res.status(200).send({ accessToken });
+  } catch (err) {
+    res.status(400).send({
+      message: err.message,
+    });
+  }
+
   await BaseDatabase.destroyConnection();
 });
 
@@ -82,6 +122,7 @@ app.post("/login", async (req: Request, res: Response) => {
       name: req.body.name,
       password: req.body.password,
       role: req.body.role,
+      device: req.body.device,
     };
 
     const userDatabase = new UserCookenuDatabase();
@@ -95,13 +136,38 @@ app.post("/login", async (req: Request, res: Response) => {
     }
 
     const authenticator = new Authenticator();
-    const token = authenticator.generateToken({
-      id: user.id,
-      role: user.role,
-    });
+    const accessToken = authenticator.generateToken(
+      { id: user.id, role: user.role },
+      "2min"
+    );
+
+    const refreshToken = authenticator.generateToken(
+      { id: user.id, device: userData.device },
+      process.env.REFRESH_TOKEN_EXPIRES_IN
+    );
+
+    const refreshTokenDatabase = new RefreshTokenDatabase();
+    const retrievedTokenFromDatabase = await refreshTokenDatabase.getRefreshTokenByIdAndDevice(
+      user.id,
+      userData.device
+    );
+
+    if (retrievedTokenFromDatabase) {
+      await refreshTokenDatabase.deleteRefreshToken(
+        retrievedTokenFromDatabase.token
+      );
+    }
+
+    await refreshTokenDatabase.createRefreshToken(
+      refreshToken,
+      userData.device,
+      true,
+      user.id
+    );
 
     res.status(200).send({
-      token,
+      accessToken,
+      refreshToken,
     });
   } catch (err) {
     res.status(400).send({
@@ -150,7 +216,7 @@ app.post("/recipe", async (req: Request, res: Response) => {
     const authenticationData = authenticator.getData(token);
 
     const recipe = new RecipeDatabase();
-    recipe.createRecipe(
+    await recipe.createRecipe(
       id,
       recipeData.title,
       recipeData.description,
@@ -257,7 +323,7 @@ app.get("/user/feed", async (req: Request, res: Response) => {
 
     const followersDatabase = new Followers();
 
-    const feed = await followersDatabase.getFeed(authenticationData.id)
+    const feed = await followersDatabase.getFeed(authenticationData.id);
 
     res.status(200).send({
       feed,
@@ -276,7 +342,7 @@ app.get("/user/:id", async (req: Request, res: Response) => {
     const authenticator = new Authenticator();
     const authenticationData = authenticator.getData(token);
 
-    const id = req.params.id
+    const id = req.params.id;
 
     const userDatabase = new UserCookenuDatabase();
     const user = await userDatabase.getUserById(id);
@@ -286,6 +352,73 @@ app.get("/user/:id", async (req: Request, res: Response) => {
       name: user.name,
       email: user.email,
       role: authenticationData.role,
+    });
+  } catch (err) {
+    res.status(400).send({
+      message: err.message,
+    });
+  }
+  await BaseDatabase.destroyConnection();
+});
+
+app.get("/recipe/edit/:id", async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.token as string;
+
+    const authenticator = new Authenticator();
+    const authenticationData = authenticator.getData(token);
+
+    const idRecipe = req.params.id;
+    const recipeData = {
+      title: req.body.title,
+      description: req.body.description,
+    };
+
+    const recipeDatabase = new RecipeDatabase();
+    const recipe = await recipeDatabase.getRecipeById(idRecipe);
+
+    if (authenticationData.id !== recipe.user_id) {
+      throw new Error("Invalid user");
+    }
+
+    await recipeDatabase.editRecipe(
+      idRecipe,
+      recipeData.title,
+      recipeData.description
+    );
+
+    res.status(200).send({
+      message: "Your recipe has been successfully edited",
+    });
+  } catch (err) {
+    res.status(400).send({
+      message: err.message,
+    });
+  }
+
+  await BaseDatabase.destroyConnection();
+});
+
+app.delete("/recipe/delete/:id", async (req: Request, res: Response) => {
+  try {
+    const token = req.headers.token as string;
+
+    const authenticator = new Authenticator();
+    const authenticationData = authenticator.getData(token);
+
+    const idRecipe = req.params.id;
+
+    const recipeDatabase = new RecipeDatabase();
+    const recipe = await recipeDatabase.getRecipeById(idRecipe);
+
+    if (authenticationData.id !== recipe.user_id) {
+      throw new Error("Invalid user");
+    }
+
+    await recipeDatabase.deleteRecipe(idRecipe);
+
+    res.status(200).send({
+      message: "Deleted",
     });
   } catch (err) {
     res.status(400).send({
