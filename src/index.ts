@@ -1,6 +1,5 @@
 import express from "express";
 import dotenv from "dotenv";
-import knex from "knex";
 import { AddressInfo } from "net";
 import { Request, Response } from "express";
 import { IdGenerator } from "./service/IdGenerator";
@@ -10,6 +9,7 @@ import { Authenticator } from "./service/Authenticator";
 import { BaseDatabase } from "./data/BaseDatabase";
 import { RecipeDatabase } from "./data/RecipeDatabase";
 import { Followers } from "./data/FollowersDatabase";
+import { RefreshTokenDatabase } from "./data/RefreshTokenDatabase";
 
 dotenv.config();
 const app = express();
@@ -31,6 +31,7 @@ app.post("/signup", async (req: Request, res: Response) => {
       name: req.body.name,
       password: req.body.password,
       role: req.body.role,
+      device: req.body.device,
     };
 
     const id = new IdGenerator().generate();
@@ -44,20 +45,69 @@ app.post("/signup", async (req: Request, res: Response) => {
       userData.email,
       userData.name,
       hashPassword,
-      userData.role
+      userData.role,
+      userData.device
     );
 
     const authenticator = new Authenticator();
-    const token = authenticator.generateToken({ id, role: userData.role });
+
+    const accessToken = authenticator.generateToken(
+      { id, role: userData.role },
+      "2min"
+    );
+
+    const refreshToken = authenticator.generateToken(
+      { id, device: userData.device },
+      process.env.REFRESH_TOKEN_EXPIRES_IN
+    );
+
+    const refreshTokenDatabase = new RefreshTokenDatabase();
+    await refreshTokenDatabase.createRefreshToken(
+      refreshToken,
+      userData.device,
+      true,
+      id
+    );
 
     res.status(200).send({
-      token,
+      accessToken,
+      refreshToken,
     });
   } catch (err) {
     res.status(400).send({
       message: err.message,
     });
   }
+  await BaseDatabase.destroyConnection();
+});
+
+app.post("/refresh/token", async (req: Request, res: Response) => {
+  try {
+    const refreshToken = req.body.refreshToken;
+    const device = req.body.device;
+
+    const authenticator = new Authenticator();
+    const refreshTokenData = authenticator.getData(refreshToken);
+
+    if (refreshTokenData.device !== device) {
+      throw new Error("Different devices");
+    }
+
+    const userDatabase = new UserCookenuDatabase();
+    const user = await userDatabase.getUserById(refreshTokenData.id);
+
+    const accessToken = authenticator.generateToken(
+      { id: user.id, role: user.role },
+      "2min"
+    );
+
+    res.status(200).send({ accessToken });
+  } catch (err) {
+    res.status(400).send({
+      message: err.message,
+    });
+  }
+
   await BaseDatabase.destroyConnection();
 });
 
@@ -72,6 +122,7 @@ app.post("/login", async (req: Request, res: Response) => {
       name: req.body.name,
       password: req.body.password,
       role: req.body.role,
+      device: req.body.device,
     };
 
     const userDatabase = new UserCookenuDatabase();
@@ -85,13 +136,38 @@ app.post("/login", async (req: Request, res: Response) => {
     }
 
     const authenticator = new Authenticator();
-    const token = authenticator.generateToken({
-      id: user.id,
-      role: user.role,
-    });
+    const accessToken = authenticator.generateToken(
+      { id: user.id, role: user.role },
+      "2min"
+    );
+
+    const refreshToken = authenticator.generateToken(
+      { id: user.id, device: userData.device },
+      process.env.REFRESH_TOKEN_EXPIRES_IN
+    );
+
+    const refreshTokenDatabase = new RefreshTokenDatabase();
+    const retrievedTokenFromDatabase = await refreshTokenDatabase.getRefreshTokenByIdAndDevice(
+      user.id,
+      userData.device
+    );
+
+    if (retrievedTokenFromDatabase) {
+      await refreshTokenDatabase.deleteRefreshToken(
+        retrievedTokenFromDatabase.token
+      );
+    }
+
+    await refreshTokenDatabase.createRefreshToken(
+      refreshToken,
+      userData.device,
+      true,
+      user.id
+    );
 
     res.status(200).send({
-      token,
+      accessToken,
+      refreshToken,
     });
   } catch (err) {
     res.status(400).send({
